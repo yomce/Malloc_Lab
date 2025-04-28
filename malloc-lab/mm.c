@@ -127,33 +127,36 @@ static void place(void *bp, size_t asize)
  */
 void *mm_malloc(size_t size)
 {
-    size_t asize; /* Adjusted block size */
-    size_t extendsize; /* Amount to extend heap if no fit */
+    size_t asize;        // 조정된 블록 크기
+    size_t extendsize;   // fit이 안 될 경우 힙을 얼마나 확장할지
     char *bp;
 
-    /* Ignore spurious requests */
+    /* 1. 요청 크기가 0이면 무시 */
     if (size == 0)
         return NULL;
-    
-    /* Adjust block size to include overhead and alignment reqs. */
+
+    /* 2. 블록 크기를 오버헤드 + 정렬을 고려해서 조정 */
     if (size <= DSIZE)
-        asize = 2*DSIZE;
+        asize = 2 * DSIZE;   // 최소 블록 크기 (header + footer 포함)
     else
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+        // 요청한 size에 header/footer 포함 후 8바이트 정렬
 
-    /* Search the free list for a fit */
+    /* 3. free list에서 적당한 블록 찾기 */
     if ((bp = find_fit(asize)) != NULL) {
-        place(bp, asize);
+        place(bp, asize); // 찾은 블록에 asize만큼 할당
         return bp;
     }
 
-    /* No fit found. Get more memory and place the block */
-    extendsize = MAX(asize,CHUNKSIZE);
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)
+    /* 4. free list에 없으면, 힙을 확장해서 블록 할당 */
+    extendsize = MAX(asize, CHUNKSIZE); // 최소 CHUNKSIZE만큼 확장
+    if ((bp = extend_heap(extendsize / WSIZE)) == NULL)
         return NULL;
-    place(bp, asize);
+    
+    place(bp, asize); // 새로 확장한 공간에 블록 할당
     return bp;
 }
+
 
 static void *extend_heap(size_t words)
 {
@@ -224,17 +227,59 @@ static void *coalesce(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    void *oldptr = ptr;
+    size_t oldsize;
+    size_t newsize;
     void *newptr;
-    size_t copySize;
+    
+    // 요청한 크기가 0이면 ptr 해제하고 NULL 리턴
+    if (size == 0) {
+        mm_free(ptr);
+        return NULL;
+    }
+    
+    // ptr이 NULL이면 malloc(size)와 동일
+    if (ptr == NULL) {
+        return mm_malloc(size);
+    }
 
+    // 새 요청 크기 계산: header/footer + align 고려
+    if (size <= DSIZE)
+        newsize = 2 * DSIZE;
+    else
+        newsize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
+
+    oldsize = GET_SIZE(HDRP(ptr));
+
+    // (1) 기존 블록이 새 요청을 만족하면
+    if (oldsize >= newsize) {
+        return ptr;
+    }
+
+    // (2) 바로 다음 블록이 free이고, 합쳐서 충분하면
+    if (!GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) {
+        size_t next_size = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+
+        if ((oldsize + next_size) >= newsize) {
+            // 현재 블록을 확장
+            PUT(HDRP(ptr), PACK(oldsize + next_size, 1));
+            PUT(FTRP(ptr), PACK(oldsize + next_size, 1));
+            return ptr;
+        }
+    }
+
+    // (3) 현재 블록으로도, 합쳐서도 안되면 새로 할당
     newptr = mm_malloc(size);
     if (newptr == NULL)
         return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+
+    // 데이터 복사
+    size_t copySize = oldsize;
     if (size < copySize)
         copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
+    memcpy(newptr, ptr, copySize);
+
+    // 기존 블록 해제
+    mm_free(ptr);
+
     return newptr;
 }
