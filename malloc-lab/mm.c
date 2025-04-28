@@ -89,6 +89,21 @@ int mm_init(void)
         return -1;
     return 0;
 }
+
+static void *find_fit(size_t asize)
+{
+    /* First-fit search */
+    void *bp;
+
+    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+            return bp;
+        }
+    }
+    return NULL; /* No fit */
+// #endif
+}
+
 /*
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
