@@ -280,64 +280,59 @@ void *mm_realloc(void *ptr, size_t size)
     size_t oldsize;
     size_t newsize;
     void *newptr;
-    
-    // 요청한 크기가 0이면 ptr 해제하고 NULL 리턴
+
     if (size == 0) {
         mm_free(ptr);
         return NULL;
     }
-    
-    // ptr이 NULL이면 malloc(size)와 동일
+
     if (ptr == NULL) {
         return mm_malloc(size);
     }
 
-    // 새 요청 크기 계산: header/footer + align 고려
     if (size <= DSIZE)
         newsize = 2 * DSIZE;
     else
-        newsize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
+        newsize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
 
     oldsize = GET_SIZE(HDRP(ptr));
 
-    // (1) 기존 블록이 새 요청을 만족하면
     if (oldsize >= newsize) {
         return ptr;
     }
 
-    // (2) 바로 다음 블록이 free이고, 합쳐서 충분하면
-    if (!GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) {
-        size_t next_size = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
-
-        if ((oldsize + next_size) >= newsize) {
-            // 현재 블록을 확장
+    void *next = NEXT_BLKP(ptr);
+    if (!GET_ALLOC(HDRP(next))) {
+        size_t next_size = GET_SIZE(HDRP(next));
+        if (oldsize + next_size >= newsize) {
             size_t total_size = oldsize + next_size;
+
+            // Free next block from heap structure
             PUT(HDRP(ptr), PACK(total_size, 1));
             PUT(FTRP(ptr), PACK(total_size, 1));
 
-        // 분할 가능한 경우 처리
             if ((total_size - newsize) >= (2 * DSIZE)) {
-                void *next_ptr = NEXT_BLKP(ptr);
-                PUT(HDRP(next_ptr), PACK(total_size - newsize, 0));
-                PUT(FTRP(next_ptr), PACK(total_size - newsize, 0));
+                void *split = NEXT_BLKP(ptr);
+                size_t remain = total_size - newsize;
+                PUT(HDRP(ptr), PACK(newsize, 1));
+                PUT(FTRP(ptr), PACK(newsize, 1));
+                PUT(HDRP(split), PACK(remain, 0));
+                PUT(FTRP(split), PACK(remain, 0));
+                coalesce(split);
             }
 
-        return ptr;
+            return ptr;
         }
     }
 
-    // (3) 현재 블록으로도, 합쳐서도 안되면 새로 할당
     newptr = mm_malloc(size);
     if (newptr == NULL)
         return NULL;
 
-    // 데이터 복사
     size_t copySize = oldsize;
     if (size < copySize)
         copySize = size;
     memcpy(newptr, ptr, copySize);
-
-    // 기존 블록 해제
     mm_free(ptr);
 
     return newptr;
