@@ -26,11 +26,11 @@ static char *heap_listp;
  ********************************************************/
 team_t team = {
     /* Team name */
-    "ateam",
+    "team 4",
     /* First member's full name */
-    "Harry Bovik",
+    "Kim GyeongYeon",
     /* First member's email address */
-    "bovik@cs.cmu.edu",
+    "kky032911@gmail.com",
     /* Second member's full name (leave blank if none) */
     "",
     /* Second member's email address (leave blank if none) */
