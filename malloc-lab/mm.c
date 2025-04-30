@@ -19,6 +19,11 @@
 #include "memlib.h"
 
 static char *heap_listp;
+static char *last_fit = NULL;
+// #ifdef NEXT_FIT
+// static char *last_fit = NULL;
+// #endif
+
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -70,6 +75,10 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+// 전략 선택 매크로 (FIRST_FIT or NEXT_FIT)
+#define NEXT_FIT
+
+
 /*
  * mm_init - initialize the malloc package.
  */
@@ -84,6 +93,10 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0, 1)); /* Epilogue header */
     heap_listp += (2*WSIZE);
 
+    #ifdef NEXT_FIT
+        last_fit = heap_listp;
+    #endif
+
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
@@ -92,33 +105,54 @@ int mm_init(void)
 
 static void *find_fit(size_t asize)
 {
-    /* First-fit search */
+#ifdef FIRST_FIT
     void *bp;
-
     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
     }
-    return NULL; /* No fit */
-// #endif
+    return NULL;
+
+#elif defined(NEXT_FIT)
+    void *bp = last_fit;
+
+    // 1차: 마지막 탐색 위치부터 힙 끝까지
+    for (; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
+            last_fit = bp;
+            return bp;
+        }
+    }
+
+    // 2차: 힙 시작부터 last_fit 전까지
+    for (bp = heap_listp; bp < last_fit; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
+            last_fit = bp;
+            return bp;
+        }
+    }
+
+    return NULL;
+#endif
 }
 
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
 
-    if ((csize - asize) >= (2*DSIZE)) {
+    if ((csize - asize) >= (2 * DSIZE)) {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
-        bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(csize-asize, 0));
-        PUT(FTRP(bp), PACK(csize-asize, 0));
-    }
-    else {
+        
+        void *next_bp = NEXT_BLKP(bp);
+        PUT(HDRP(next_bp), PACK(csize - asize, 0));
+        PUT(FTRP(next_bp), PACK(csize - asize, 0));
+    } else {
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
+    
 }
 
 /*
@@ -174,7 +208,13 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
     /* Coalesce if the previous block was free */
-    return coalesce(bp);
+    
+    bp = coalesce(bp);
+    #ifdef NEXT_FIT
+        last_fit = bp;
+    #endif
+    return bp;
+
 }
 
 /*
@@ -186,7 +226,12 @@ void mm_free(void *bp)
 
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    coalesce(bp);
+
+    bp = coalesce(bp);
+    #ifdef NEXT_FIT
+        last_fit = bp;
+    #endif
+
 }
 
 static void *coalesce(void *bp)
@@ -219,7 +264,12 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+#ifdef NEXT_FIT
+    last_fit = bp;
+#endif
     return bp;
+
+
 }
 
 /*
@@ -261,9 +311,18 @@ void *mm_realloc(void *ptr, size_t size)
 
         if ((oldsize + next_size) >= newsize) {
             // 현재 블록을 확장
-            PUT(HDRP(ptr), PACK(oldsize + next_size, 1));
-            PUT(FTRP(ptr), PACK(oldsize + next_size, 1));
-            return ptr;
+            size_t total_size = oldsize + next_size;
+            PUT(HDRP(ptr), PACK(total_size, 1));
+            PUT(FTRP(ptr), PACK(total_size, 1));
+
+        // 분할 가능한 경우 처리
+            if ((total_size - newsize) >= (2 * DSIZE)) {
+                void *next_ptr = NEXT_BLKP(ptr);
+                PUT(HDRP(next_ptr), PACK(total_size - newsize, 0));
+                PUT(FTRP(next_ptr), PACK(total_size - newsize, 0));
+            }
+
+        return ptr;
         }
     }
 
